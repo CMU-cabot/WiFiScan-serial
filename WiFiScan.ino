@@ -64,6 +64,10 @@
 // verbosity
 #define DEFAULT_VERBOSITY (true)
 
+//declare reset function @ address 0
+void(* resetFunc) (void) = 0;
+
+
 ros::NodeHandle nh;
 std_msgs::String wifi_scan_msg;
 ros::Publisher wifi_scan_pub("wifi_scan_str", &wifi_scan_msg);
@@ -104,7 +108,7 @@ void configure()
   if (!nh.getParam("~scan_interval", &scan_interval, 1, 500)) {
     scan_interval = DEFAULT_SCAN_INTERVAL;
   }
-  
+
   if (verbose) {
     nh.loginfo("you can suppress loginfo by _verbose:=false");
     sprintf(buf, "max_skip:=%d", max_skip);
@@ -116,46 +120,44 @@ void configure()
     sprintf(buf, "scan_interval:=%d", scan_interval);
     nh.loginfo(buf);
   }
+
   nh.loginfo("Configuration updated");
-  delay(1000);
+  nh.spinOnce();
 }
 
 void setup()
 {
+  // init hardware
   nh.getHardware()->setBaud(BAUDRATE);
+  WiFi.mode(WIFI_STA);
+  WiFi.disconnect();
+
+  // init rosserial
   nh.initNode();
+  nh.advertise(wifi_scan_pub);
   while(!nh.connected()) {
     nh.spinOnce();
     delay(100);
   }
 
   configure();
-  
-  nh.advertise(wifi_scan_pub);
 
-  WiFi.mode(WIFI_STA);
-  WiFi.disconnect();
-  delay(100);
-
+  // init internal state
   scanningStart = millis();
-  
   memset(skip, 0, sizeof(skip));
   memset(count, 0, sizeof(count));
   memset(lastseen, 0, sizeof(lastseen));
+
   nh.loginfo("Setup done");
 }
 
 void loop()
 {
   if (!nh.connected()) {
-    while(!nh.connected()) {
-      nh.spinOnce();
-      delay(100);
-    }
-
-    configure();
+    // if it is disconnected reset
+    resetFunc();
   }
-  
+
   handleScan();
 }
 
@@ -203,7 +205,7 @@ void handleScan()
       }
       lastseen[channel] = millis();
       scanningStart = millis()+scan_interval;
-      
+
       if (n == 0) {
 	// increments skip count if no AP is found at the current channel
         skip[channel] = min(skip[channel]+1, max_skip);
