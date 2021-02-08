@@ -95,6 +95,7 @@ int scanningStart = 0;
 int channel = 0;
 int skip[MAX_CHANNEL];
 int count[MAX_CHANNEL];
+int aps[MAX_CHANNEL];
 unsigned long lastseen[MAX_CHANNEL];
 char buf[256];
 
@@ -191,6 +192,7 @@ void setup()
   scanningStart = millis();
   memset(skip, 0, sizeof(skip));
   memset(count, 0, sizeof(count));
+  memset(aps, 0, sizeof(count));
   memset(lastseen, 0, sizeof(lastseen));
 
   loginfo("Setup done");
@@ -204,6 +206,20 @@ void loop()
   }
 
   handleScan();
+}
+
+void showScanStatus()
+{
+  if (!is_display_available) {
+    return;
+  }
+  sprintf(buf, "");
+  for (int i = 0; i < n_channel; i++) {
+    sprintf(buf+strlen(buf), "%2d:%3d|", i+1, aps[i], (millis()-lastseen[i])/1000.0);
+  }
+  display.clearDisplay();
+  showText(buf, 0);
+  display.display();
 }
 
 /*
@@ -244,9 +260,12 @@ void handleScan()
     if ((n = WiFi.scanComplete()) >= 0) {
       // scan completed
       if (verbose) {
-        sprintf(buf, "[ch:%2d][skip:%2d/%2d]\n[%2dAPs]%3dms,%5dms",
-                channel+1, skip[channel], max_skip, n, millis()-scanningStart, millis()-lastseen[channel]);
-        loginfo(buf);
+	aps[channel] = n;
+	showScanStatus();
+	sprintf(buf, "[ch:%2d][%3dAPs][skip:%2d/%2d]%3dms,%5dms",
+                channel+1, n, skip[channel], max_skip,
+		millis()-scanningStart, millis()-lastseen[channel]);
+	nh.loginfo(buf);
       }
       lastseen[channel] = millis();
       scanningStart = millis()+scan_interval;
