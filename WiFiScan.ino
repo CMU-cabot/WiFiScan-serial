@@ -37,6 +37,15 @@
 #include "std_msgs/String.h"
 #include "WiFi.h"
 #include "esp_wifi.h"
+#include <SPI.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 32
+#define OLED_RESET     4
+#define SCREEN_ADDRESS 0x3C
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
 // baud rate for serial connection
 #define BAUDRATE (115200)
@@ -68,6 +77,8 @@
 void(* resetFunc) (void) = 0;
 
 
+bool is_display_available = false;
+
 ros::NodeHandle nh;
 std_msgs::String wifi_scan_msg;
 ros::Publisher wifi_scan_pub("wifi_scan_str", &wifi_scan_msg);
@@ -91,6 +102,33 @@ char buf[256];
 char msg_buf[MAX_WAITING][100]; 
 int waiting = 0;
 
+void loginfo(char *buf)
+{
+  nh.loginfo(buf);
+  nh.spinOnce();
+
+  if (!is_display_available) {
+    return;
+  }
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(0, 0);
+  display.println(F(buf));
+  display.display();
+}
+
+void showText(char *buf, int row)
+{
+  if (!is_display_available) {
+    return;
+  }
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(0, 8*row);
+  display.println(F(buf));
+}
+
 void configure()
 {
   if (!nh.getParam("~verbose", &verbose, 1, 500)) {
@@ -110,23 +148,30 @@ void configure()
   }
 
   if (verbose) {
-    nh.loginfo("you can suppress loginfo by _verbose:=false");
+    loginfo("you can suppress loginfo by _verbose:=false");
     sprintf(buf, "max_skip:=%d", max_skip);
-    nh.loginfo(buf);
+    loginfo(buf);
     sprintf(buf, "n_channel:=%d", n_channel);
-    nh.loginfo(buf);
+    loginfo(buf);
     sprintf(buf, "scan_duration:=%d", scan_duration);
-    nh.loginfo(buf);
+    loginfo(buf);
     sprintf(buf, "scan_interval:=%d", scan_interval);
-    nh.loginfo(buf);
+    loginfo(buf);
   }
 
-  nh.loginfo("Configuration updated");
-  nh.spinOnce();
+  loginfo("Configuration updated");
 }
 
 void setup()
 {
+  if(display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) {
+    is_display_available = true;
+      display.clearDisplay();
+      showText("WiFi Scanner Ready", 0);
+      showText("Waiting Connection", 1);
+      display.display();
+  }
+
   // init hardware
   nh.getHardware()->setBaud(BAUDRATE);
   WiFi.mode(WIFI_STA);
@@ -148,7 +193,7 @@ void setup()
   memset(count, 0, sizeof(count));
   memset(lastseen, 0, sizeof(lastseen));
 
-  nh.loginfo("Setup done");
+  loginfo("Setup done");
 }
 
 void loop()
@@ -199,9 +244,9 @@ void handleScan()
     if ((n = WiFi.scanComplete()) >= 0) {
       // scan completed
       if (verbose) {
-        sprintf(buf, "[ch:%2d][skip:%2d/%2d][%d APs] %3d ms, %5d ms since lastseen, ",
+        sprintf(buf, "[ch:%2d][skip:%2d/%2d]\n[%2dAPs]%3dms,%5dms",
                 channel+1, skip[channel], max_skip, n, millis()-scanningStart, millis()-lastseen[channel]);
-        nh.loginfo(buf);
+        loginfo(buf);
       }
       lastseen[channel] = millis();
       scanningStart = millis()+scan_interval;
