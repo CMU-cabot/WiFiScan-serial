@@ -2,6 +2,11 @@
 
 This program scans WiFi (2.4GHz only) APs with ESP32-WROOM-32D board and publish `/wifi_scan_str` topic on ROS via rosserial.
 
+### Optional hardware
+
+- [Adafruit OLED 128x32 monochrome display](https://www.adafruit.com/product/931) to show scanning status
+  - connect with Quiic (or I2C)
+
 ### `/wifi_scan_str` format
 ```
 type: std_msgs/String
