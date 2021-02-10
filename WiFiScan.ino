@@ -60,7 +60,7 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 #define DEFAULT_SCAN_DURATION (105)
 
 // need some interval if you want to transport via WiFi
-#define DEFAULT_SCAN_INTERVAL (0)
+#define DEFAULT_SCAN_INTERVAL (5)
 
 // maximum wait cycle
 // if you have APs in 3 channels in your environment, the maximum wait time is like
@@ -73,8 +73,11 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 // verbosity
 #define DEFAULT_VERBOSITY (true)
 
-//declare reset function @ address 0
-void(* resetFunc) (void) = 0;
+// declare reset function @ address 0
+// this can cause undesirable result with multiple core system like ESP32
+// void(* resetFunc) (void) = 0;
+
+#define PARAM_TIMEOUT (100)
 
 
 bool is_display_available = false;
@@ -91,7 +94,7 @@ bool verbose = DEFAULT_VERBOSITY;
 
 
 bool isScanning = false;
-int scanningStart = 0;
+unsigned long scanningStart = 0;
 int channel = 0;
 int skip[MAX_CHANNEL];
 int count[MAX_CHANNEL];
@@ -102,11 +105,11 @@ char buf[256];
 // BSSID=17, SSID=32, CH=2, RSSI=4, sec=10, nsec=10, commas=5, total 80 + margin 20
 char msg_buf[MAX_WAITING][100]; 
 int waiting = 0;
+int all_zero_count = 0;
 
 void loginfo(char *buf)
 {
   nh.loginfo(buf);
-  nh.spinOnce();
 
   if (!is_display_available) {
     return;
@@ -132,19 +135,19 @@ void showText(char *buf, int row)
 
 void configure()
 {
-  if (!nh.getParam("~verbose", &verbose, 1, 500)) {
+  if (!nh.getParam("~verbose", &verbose, 1, PARAM_TIMEOUT)) {
     verbose = DEFAULT_VERBOSITY;
   }
-  if (!nh.getParam("~max_skip", &max_skip, 1, 500)) {
+  if (!nh.getParam("~max_skip", &max_skip, 1, PARAM_TIMEOUT)) {
     max_skip = DEFAULT_MAX_SKIP;
   }
-  if (!nh.getParam("~n_channel", &n_channel, 1, 500)) {
+  if (!nh.getParam("~n_channel", &n_channel, 1, PARAM_TIMEOUT)) {
     n_channel = DEFAULT_N_CHANNEL;
   }
-  if (!nh.getParam("~scan_duration", &scan_duration, 1, 500)) {
+  if (!nh.getParam("~scan_duration", &scan_duration, 1, PARAM_TIMEOUT)) {
     scan_duration = DEFAULT_SCAN_DURATION;
   }
-  if (!nh.getParam("~scan_interval", &scan_interval, 1, 500)) {
+  if (!nh.getParam("~scan_interval", &scan_interval, 1, PARAM_TIMEOUT)) {
     scan_interval = DEFAULT_SCAN_INTERVAL;
   }
 
@@ -163,14 +166,21 @@ void configure()
   loginfo("Configuration updated");
 }
 
+void showAppStatus()
+{
+  display.clearDisplay();
+  showText("WiFi Scanner Ready", 0);
+  showText("Waiting Connection", 1);
+  sprintf(buf, "Time: %7.1f", millis()/1000.0);
+  showText(buf, 2);
+  display.display();
+}
+
 void setup()
 {
   if(display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) {
     is_display_available = true;
-      display.clearDisplay();
-      showText("WiFi Scanner Ready", 0);
-      showText("Waiting Connection", 1);
-      display.display();
+    showAppStatus();
   }
 
   // init hardware
@@ -180,10 +190,21 @@ void setup()
 
   // init rosserial
   nh.initNode();
+  nh.setSpinTimeout(100);
   nh.advertise(wifi_scan_pub);
+
+  int wait = millis();
   while(!nh.connected()) {
+    showAppStatus();
     nh.spinOnce();
     delay(100);
+
+    // TODO
+    // very rarely, it can be astate that the serial cannot be connected
+    // so reset every 10 seconds
+    if (millis() - wait > 10*1000) {
+      restart();
+    }
   }
 
   configure();
@@ -200,12 +221,8 @@ void setup()
 
 void loop()
 {
-  if (!nh.connected()) {
-    // if it is disconnected reset
-    resetFunc();
-  }
-
   handleScan();
+  nh.spinOnce();
 }
 
 void showScanStatus()
@@ -217,6 +234,10 @@ void showScanStatus()
   for (int i = 0; i < n_channel; i++) {
     sprintf(buf+strlen(buf), "%2d:%3d|", i+1, aps[i], (millis()-lastseen[i])/1000.0);
   }
+  sprintf(buf+strlen(buf), "%2d", channel+1);
+  sprintf(buf+strlen(buf), "%s", nh.connected()?"*":"-");
+  sprintf(buf+strlen(buf), ",%s", isScanning?"*":"-");
+  sprintf(buf+strlen(buf), "%2d", all_zero_count);
   display.clearDisplay();
   showText(buf, 0);
   display.display();
@@ -230,6 +251,16 @@ void showScanStatus()
 void handleScan()
 {
   if (isScanning == false) {
+    if (!nh.connected()) {
+      restart();
+    }
+    // TODO
+    // not sure why, but when the serial is disconnected
+    // sometimes it can be a strange state that nh.connected() == true and WiFi Scan does not work
+    // restart the hardware if the WiFi scan returns no result for 10 consequtive cycles
+    if (channel == 0) {
+      checkZeroScan(10);
+    }
     if (millis() <= scanningStart) {
       // during scan interval
       checkQueue();
@@ -249,21 +280,22 @@ void handleScan()
       scanningStart = millis();
       count[channel] = 0;
       isScanning = true;
+      showScanStatus();
     } else {
       // skip until skip count
       count[channel] += 1;
       channel = (channel+1)%n_channel;
-    }    
+    }
   }
   else {
     int n = 0;
     if ((n = WiFi.scanComplete()) >= 0) {
       // scan completed
+      aps[channel] = n;
+      showScanStatus();
       if (verbose) {
-	aps[channel] = n;
-	showScanStatus();
 	sprintf(buf, "[ch:%2d][%3dAPs][skip:%2d/%2d]%3dms,%5dms",
-                channel+1, n, skip[channel], max_skip,
+		channel+1, n, skip[channel], max_skip,
 		millis()-scanningStart, millis()-lastseen[channel]);
 	nh.loginfo(buf);
       }
@@ -298,6 +330,29 @@ void checkQueue()
     waiting--;
     wifi_scan_msg.data = msg_buf[waiting];
     wifi_scan_pub.publish(&wifi_scan_msg);
-    nh.spinOnce();
   }
+}
+
+void checkZeroScan(int maximum)
+{
+  bool all_zero = true;
+  for(int i = 0; i < n_channel; i++) {
+    all_zero = all_zero && aps[i] == 0;
+  }
+  if (all_zero) {
+    all_zero_count++;
+    if (all_zero_count > maximum) {
+      restart();
+    }
+  } else {
+    all_zero_count = 0;
+  }
+}
+
+void restart()
+{
+  display.clearDisplay();
+  showText("Restart ESP", 0);
+  display.display();
+  ESP.restart();
 }
