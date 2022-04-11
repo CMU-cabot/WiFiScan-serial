@@ -309,7 +309,9 @@ void handleScan()
 	// if APs are found, put string into the queue
         skip[channel] = 0;
         for (int i = 0; i < n && waiting < MAX_WAITING; ++i) {
-          sprintf(msg_buf[waiting], "%s,%s,%d,%d,%d,%d", WiFi.BSSIDstr(i).c_str(), WiFi.SSID(i).c_str(),
+          String name = WiFi.SSID(i);
+          name.replace(","," ");
+          sprintf(msg_buf[waiting], "%s,%s,%d,%d,%d,%d", WiFi.BSSIDstr(i).c_str(), name.c_str(),
                   WiFi.channel(i), WiFi.RSSI(i), nh.now().sec, nh.now().nsec);
 	  waiting++;
         }
