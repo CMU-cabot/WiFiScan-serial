@@ -1,0 +1,23 @@
+version: "2.3"
+
+
+services:
+  arduino:
+    build: .
+    environment:
+      - ARDUINO_BOARD
+      - ARDUINO_PORT
+    volumes:
+      - ./:/mnt/WiFiScan
+      - /dev:/dev
+      - /sys/devices:/sys/devices
+# required for display or device
+    privileged: true
+# device, bluetooth
+    devices:
+      - /dev/dri
+# device, bluetooth
+    network_mode: host
+    working_dir: /mnt/WiFiScan
+    command:
+      - "bash"
