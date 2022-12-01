@@ -130,7 +130,15 @@ bool Handle::getParam(char *name, int *out, size_t num, int timeout_ms)
   return true;
 }
 
-void Handle::publish(uint8_t cmd, char *data, size_t num) { sendCommand(cmd, reinterpret_cast<uint8_t *>(data), num); }
+void Handle::publish(uint8_t cmd, char *data, size_t num) // prevent from no wrapping
+{
+  sendCommand(cmd, reinterpret_cast<uint8_t *>(data), num);
+}
+
+void Handle::publish(uint8_t cmd, uint8_t *data, size_t num) // prevent from no wrapping
+{
+  sendCommand(cmd, data, num);
+}
 
 void Handle::publish(uint8_t cmd, int8_t *data, size_t num)
 {

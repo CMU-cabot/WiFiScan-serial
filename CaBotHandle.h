@@ -51,6 +51,7 @@ public:
   void loginfo(char *);
   void logwarn(char *);
   bool getParam(char *, int *, size_t, int);
+  void publish(uint8_t, uint8_t *, size_t);
   void publish(uint8_t, int8_t *, size_t);
   void publish(uint8_t, char *, size_t);
   void publish(uint8_t, float *, size_t);
