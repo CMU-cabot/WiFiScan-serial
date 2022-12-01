@@ -25,25 +25,18 @@
 // format: BSSID,SSID,Channel,RSSI,sec,nsec
 //
 
-// https://github.com/ros-drivers/rosserial/pull/448
-// #define ESP_SERIAL
-// still not included in released version 0.9.1
-// the following is a workaround
-#undef ESP32
-#include "ros.h"
-#define ESP32
+#include "CaBotHandle.h" // alternative implementation not using ros.h
 
 #include "Arduino.h"
-#include "std_msgs/String.h"
 #include "WiFi.h"
 #include "esp_wifi.h"
-#include <SPI.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
+#include <SPI.h>
 
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 32
-#define OLED_RESET     4
+#define OLED_RESET 4
 #define SCREEN_ADDRESS 0x3C
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
@@ -64,34 +57,30 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
 // maximum wait cycle
 // if you have APs in 3 channels in your environment, the maximum wait time is like
-// (3*DEFAULT_MAX_SKIP)*(DEFAULT_SCAN_DURATION+SCAN_INTERVAL) = (3*14)*105 = 42*105 = 
+// (3*DEFAULT_MAX_SKIP)*(DEFAULT_SCAN_DURATION+SCAN_INTERVAL) = (3*14)*105 = 42*105 =
 #define DEFAULT_MAX_SKIP (14)
 
 // maximum queue size, ignore if exceeds
 #define MAX_WAITING (128)
 
 // verbosity
-#define DEFAULT_VERBOSITY (true)
+#define DEFAULT_VERBOSITY (1)
 
 // declare reset function @ address 0
 // this can cause undesirable result with multiple core system like ESP32
 // void(* resetFunc) (void) = 0;
 
-#define PARAM_TIMEOUT (100)
-
+#define PARAM_TIMEOUT (500)
 
 bool is_display_available = false;
 
-ros::NodeHandle nh;
-std_msgs::String wifi_scan_msg;
-ros::Publisher wifi_scan_pub("wifi_scan_str", &wifi_scan_msg);
+cabot::Handle ch;
 
 int max_skip = DEFAULT_MAX_SKIP;
 int n_channel = DEFAULT_N_CHANNEL;
 int scan_duration = DEFAULT_SCAN_DURATION;
 int scan_interval = DEFAULT_SCAN_INTERVAL;
-bool verbose = DEFAULT_VERBOSITY;
-
+int verbose = DEFAULT_VERBOSITY;
 
 bool isScanning = false;
 unsigned long scanningStart = 0;
@@ -103,13 +92,13 @@ unsigned long lastseen[MAX_CHANNEL];
 char buf[256];
 
 // BSSID=17, SSID=32, CH=2, RSSI=4, sec=10, nsec=10, commas=5, total 80 + margin 20
-char msg_buf[MAX_WAITING][100]; 
+char msg_buf[MAX_WAITING][100];
 int waiting = 0;
 int all_zero_count = 0;
 
 void loginfo(char *buf)
 {
-  nh.loginfo(buf);
+  ch.loginfo(buf);
 
   if (!is_display_available) {
     return;
@@ -129,38 +118,32 @@ void showText(char *buf, int row)
   }
   display.setTextSize(1);
   display.setTextColor(SSD1306_WHITE);
-  display.setCursor(0, 8*row);
+  display.setCursor(0, 8 * row);
   display.println(F(buf));
+}
+
+void configure_param(char *name, int *val)
+{
+  char buf[64];
+
+  snprintf(buf, sizeof(buf), "param %s: ", name);
+  if (!ch.getParam(name, val, 1, PARAM_TIMEOUT)) {
+    snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), "(default) ");
+  }
+  snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), "%d", *val);
+  ch.loginfo(buf);
 }
 
 void configure()
 {
-  if (!nh.getParam("~verbose", &verbose, 1, PARAM_TIMEOUT)) {
-    verbose = DEFAULT_VERBOSITY;
-  }
-  if (!nh.getParam("~max_skip", &max_skip, 1, PARAM_TIMEOUT)) {
-    max_skip = DEFAULT_MAX_SKIP;
-  }
-  if (!nh.getParam("~n_channel", &n_channel, 1, PARAM_TIMEOUT)) {
-    n_channel = DEFAULT_N_CHANNEL;
-  }
-  if (!nh.getParam("~scan_duration", &scan_duration, 1, PARAM_TIMEOUT)) {
-    scan_duration = DEFAULT_SCAN_DURATION;
-  }
-  if (!nh.getParam("~scan_interval", &scan_interval, 1, PARAM_TIMEOUT)) {
-    scan_interval = DEFAULT_SCAN_INTERVAL;
-  }
+  configure_param("~verbose", &verbose);
+  configure_param("~max_skip", &max_skip);
+  configure_param("~n_channel", &n_channel);
+  configure_param("~scan_duration", &scan_duration);
+  configure_param("~scan_interval", &scan_interval);
 
   if (verbose) {
-    loginfo("you can suppress loginfo by _verbose:=false");
-    sprintf(buf, "max_skip:=%d", max_skip);
-    loginfo(buf);
-    sprintf(buf, "n_channel:=%d", n_channel);
-    loginfo(buf);
-    sprintf(buf, "scan_duration:=%d", scan_duration);
-    loginfo(buf);
-    sprintf(buf, "scan_interval:=%d", scan_interval);
-    loginfo(buf);
+    loginfo("you can suppress loginfo by _verbose:=0");
   }
 
   loginfo("Configuration updated");
@@ -171,38 +154,36 @@ void showAppStatus()
   display.clearDisplay();
   showText("WiFi Scanner Ready", 0);
   showText("Waiting Connection", 1);
-  sprintf(buf, "Time: %7.1f", millis()/1000.0);
+  sprintf(buf, "Time: %7.1f", millis() / 1000.0);
   showText(buf, 2);
   display.display();
 }
 
 void setup()
 {
-  if(display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) {
+  if (display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) {
     is_display_available = true;
     showAppStatus();
   }
 
   // init hardware
-  nh.getHardware()->setBaud(BAUDRATE);
+  ch.setBaudRate(BAUDRATE);
   WiFi.mode(WIFI_STA);
   WiFi.disconnect();
 
   // init rosserial
-  nh.initNode();
-  nh.setSpinTimeout(100);
-  nh.advertise(wifi_scan_pub);
+  ch.init();
 
   int wait = millis();
-  while(!nh.connected()) {
+  while (!ch.connected()) {
     showAppStatus();
-    nh.spinOnce();
+    ch.spinOnce();
     delay(100);
 
     // TODO
     // very rarely, it can be astate that the serial cannot be connected
     // so reset every 10 seconds
-    if (millis() - wait > 10*1000) {
+    if (millis() - wait > 10 * 1000) {
       restart();
     }
   }
@@ -222,7 +203,7 @@ void setup()
 void loop()
 {
   handleScan();
-  nh.spinOnce();
+  ch.spinOnce();
 }
 
 void showScanStatus()
@@ -232,12 +213,12 @@ void showScanStatus()
   }
   sprintf(buf, "");
   for (int i = 0; i < n_channel; i++) {
-    sprintf(buf+strlen(buf), "%2d:%3d|", i+1, aps[i], (millis()-lastseen[i])/1000.0);
+    sprintf(buf + strlen(buf), "%2d:%3d|", i + 1, aps[i], (millis() - lastseen[i]) / 1000.0);
   }
-  sprintf(buf+strlen(buf), "%2d", channel+1);
-  sprintf(buf+strlen(buf), "%s", nh.connected()?"*":"-");
-  sprintf(buf+strlen(buf), ",%s", isScanning?"*":"-");
-  sprintf(buf+strlen(buf), "%2d", all_zero_count);
+  sprintf(buf + strlen(buf), "%2d", channel + 1);
+  sprintf(buf + strlen(buf), "%s", ch.connected() ? "*" : "-");
+  sprintf(buf + strlen(buf), ",%s", isScanning ? "*" : "-");
+  sprintf(buf + strlen(buf), "%2d", all_zero_count);
   display.clearDisplay();
   showText(buf, 0);
   display.display();
@@ -251,7 +232,7 @@ void showScanStatus()
 void handleScan()
 {
   if (isScanning == false) {
-    if (!nh.connected()) {
+    if (!ch.connected()) {
       restart();
     }
     // TODO
@@ -276,7 +257,7 @@ void handleScan()
       //                      bool passive = false,
       //                      uint32_t max_ms_per_chan = 300,
       //                      uint8_t channel = 0);
-      int n = WiFi.scanNetworks(true, false, false, scan_duration, channel+1);
+      int n = WiFi.scanNetworks(true, false, false, scan_duration, channel + 1);
       scanningStart = millis();
       count[channel] = 0;
       isScanning = true;
@@ -284,40 +265,38 @@ void handleScan()
     } else {
       // skip until skip count
       count[channel] += 1;
-      channel = (channel+1)%n_channel;
+      channel = (channel + 1) % n_channel;
     }
-  }
-  else {
+  } else {
     int n = 0;
     if ((n = WiFi.scanComplete()) >= 0) {
       // scan completed
       aps[channel] = n;
       showScanStatus();
       if (verbose) {
-	sprintf(buf, "[ch:%2d][%3dAPs][skip:%2d/%2d]%3dms,%5dms",
-		channel+1, n, skip[channel], max_skip,
-		millis()-scanningStart, millis()-lastseen[channel]);
-	nh.loginfo(buf);
+        sprintf(buf, "[ch:%2d][%3dAPs][skip:%2d/%2d]%3dms,%5dms", channel + 1, n, skip[channel], max_skip,
+                millis() - scanningStart, millis() - lastseen[channel]);
+        ch.loginfo(buf);
       }
       lastseen[channel] = millis();
-      scanningStart = millis()+scan_interval;
+      scanningStart = millis() + scan_interval;
 
       if (n == 0) {
-	// increments skip count if no AP is found at the current channel
-        skip[channel] = min(skip[channel]+1, max_skip);
+        // increments skip count if no AP is found at the current channel
+        skip[channel] = min(skip[channel] + 1, max_skip);
       } else {
-	// if APs are found, put string into the queue
+        // if APs are found, put string into the queue
         skip[channel] = 0;
         for (int i = 0; i < n && waiting < MAX_WAITING; ++i) {
           String name = WiFi.SSID(i);
-          name.replace(","," ");
-          sprintf(msg_buf[waiting], "%s,%s,%d,%d,%d,%d", WiFi.BSSIDstr(i).c_str(), name.c_str(),
-                  WiFi.channel(i), WiFi.RSSI(i), nh.now().sec, nh.now().nsec);
-	  waiting++;
+          name.replace(",", " ");
+          sprintf(msg_buf[waiting], "%s,%s,%d,%d,%d,%d", WiFi.BSSIDstr(i).c_str(), name.c_str(), WiFi.channel(i),
+                  WiFi.RSSI(i), ch.now().sec, ch.now().nsec);
+          waiting++;
         }
       }
 
-      channel = (channel+1) % n_channel;
+      channel = (channel + 1) % n_channel;
       isScanning = false;
     } else {
       // waiting scan result
@@ -330,15 +309,14 @@ void checkQueue()
 {
   if (waiting > 0) {
     waiting--;
-    wifi_scan_msg.data = msg_buf[waiting];
-    wifi_scan_pub.publish(&wifi_scan_msg);
+    ch.publish(0x20, msg_buf[waiting], strlen(msg_buf[waiting]));
   }
 }
 
 void checkZeroScan(int maximum)
 {
   bool all_zero = true;
-  for(int i = 0; i < n_channel; i++) {
+  for (int i = 0; i < n_channel; i++) {
     all_zero = all_zero && aps[i] == 0;
   }
   if (all_zero) {
