@@ -280,6 +280,7 @@ void handleScan() {
       if (n == 0) {
         // increments skip count if no AP is found at the current channel
         skip[channel] = min(skip[channel] + 1, max_skip);
+        ch.sync();
       } else {
         // if APs are found, put string into the queue
         skip[channel] = 0;
