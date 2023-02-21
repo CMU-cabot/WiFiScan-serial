@@ -134,11 +134,11 @@ void configure_param(char *name, int *val) {
 }
 
 void configure() {
-  configure_param("~verbose", &verbose);
-  configure_param("~max_skip", &max_skip);
-  configure_param("~n_channel", &n_channel);
-  configure_param("~scan_duration", &scan_duration);
-  configure_param("~scan_interval", &scan_interval);
+  configure_param("verbose", &verbose);
+  configure_param("max_skip", &max_skip);
+  configure_param("n_channel", &n_channel);
+  configure_param("scan_duration", &scan_duration);
+  configure_param("scan_interval", &scan_interval);
 
   if (verbose) {
     loginfo("you can suppress loginfo by _verbose:=0");
