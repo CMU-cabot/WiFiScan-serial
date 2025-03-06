@@ -306,7 +306,7 @@ void handleScan() {
 void checkQueue() {
   if (waiting > 0) {
     waiting--;
-    ch.publish(0x20, msg_buf[waiting], strlen(msg_buf[waiting]));
+    ch.publish(0x17, msg_buf[waiting], strlen(msg_buf[waiting]));
   }
 }
 
