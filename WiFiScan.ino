@@ -25,7 +25,7 @@
 // format: BSSID,SSID,Channel,RSSI,sec,nsec
 //
 
-#include "CaBotHandle.h"  // alternative implementation not using ros.h
+#include "CaBotHandle.hpp"  // alternative implementation not using ros.h
 
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>

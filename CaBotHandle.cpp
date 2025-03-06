@@ -20,18 +20,20 @@
  * THE SOFTWARE.
  *******************************************************************************/
 
-#include "CaBotHandle.h"
+#include "CaBotHandle.hpp"  // NOLINT
 
-//#define DEBUG 1
+// #define DEBUG 1
 
-namespace cabot {
-Handle::Handle() { mBaudRate = 0; }
+namespace cabot
+{
+Handle::Handle() {mBaudRate = 0;}
 
 Handle::~Handle() {}
 
-void Handle::setBaudRate(unsigned long rate) { mBaudRate = rate; }
+void Handle::setBaudRate(uint32_t rate) {mBaudRate = rate;}
 
-void Handle::init() {
+void Handle::init()
+{
   mConnected = false;
   mConnecting = false;
   mTimeOffset = 0;
@@ -45,24 +47,23 @@ void Handle::init() {
   size_count = 0;
   cmd = 0;
   count = 0;
-
   if (mBaudRate == 0) {
     return;
   }
   Serial.begin(mBaudRate);
   while (!Serial) {
-    ;
   }
   mConnected = true;
 }
 
-bool Handle::connected() { return mConnected; }
+bool Handle::connected() {return mConnected;}
 
-void Handle::spinOnce() {
+void Handle::spinOnce()
+{
   static uint8_t cmd = 0;
-  uint8_t *data;
+  uint8_t * data;
   int count = readCommand(&cmd, &data);
-  if (count < 0) return;
+  if (count < 0) {return;}
 
   if (cmd == 0x01 && count == 8) {
     // time sync command
@@ -100,19 +101,21 @@ void Handle::spinOnce() {
       jump = timeDiff(current, prev);
       need_to_update = true;
     } else {
-      snprintf(buff, sizeof(buff), "large time jump %lu.%09lu -> %lu.%09lu",
-               prev.sec, prev.nsec, current.sec, current.nsec);
+      snprintf(
+        buff, sizeof(buff), "large time jump %u.%09u -> %u.%09u",
+        prev.sec, prev.nsec, current.sec, current.nsec);
       logwarn(buff);
     }
 
-    //#ifdef DEBUG
-    snprintf(buff, sizeof(buff),
-             "sync,%lu,%lu.%03lu,%lu.%03lu,%lu.%03lu,%ld,%ld,%ld,%ld", ms,
-             newTime.sec, newTime.nsec / 1000000, prev.sec, prev.nsec / 1000000,
-             current.sec, current.nsec / 1000000, jump, turn_around_time,
-             back_time, temp);
+    // #ifdef DEBUG
+    snprintf(
+      buff, sizeof(buff),
+      "sync,%u,%u.%03u,%u.%03u,%u.%03u,%d,%d,%d,%d", ms,
+      newTime.sec, newTime.nsec / 1000000, prev.sec, prev.nsec / 1000000,
+      current.sec, current.nsec / 1000000, jump, turn_around_time,
+      back_time, temp);
     loginfo(buff);
-    //#endif
+    // #endif
 
     if (need_to_update) {
       mTime = newTime;
@@ -121,6 +124,8 @@ void Handle::spinOnce() {
     }
   }
   if (0x20 <= cmd && cmd <= 0x23 && count == 1) {
+    // feedback to the host
+    sendCommand(cmd, data, 1);
     // vibration commands
     for (int i = 0; i < 4; i++) {
       if (callbacks[i].cmd == cmd) {
@@ -131,35 +136,39 @@ void Handle::spinOnce() {
   cmd = 0;  // reset cmd
 }
 
-void Handle::subscribe(uint8_t cmd, void (*callback)(const uint8_t)) {
+void Handle::subscribe(uint8_t cmd, void (* callback)(const uint8_t))
+{
   Callback temp;
   temp.cmd = cmd;
   temp.callback = callback;
   callbacks[callback_count++] = temp;
 }
 
-void Handle::logdebug(char *text) { sendCommand(0x02, text, strlen(text)); }
+void Handle::logdebug(char * text) {sendCommand(0x02, text, strlen(text));}
 
-void Handle::loginfo(char *text) { sendCommand(0x03, text, strlen(text)); }
+void Handle::loginfo(const char * text) {sendCommand(0x03, text, strlen(text));}
 
-void Handle::logwarn(char *text) { sendCommand(0x04, text, strlen(text)); }
+void Handle::logwarn(const char * text) {sendCommand(0x04, text, strlen(text));}
 
-bool Handle::getParam(char *name, int *out, size_t num, int timeout_ms) {
+bool Handle::getParam(const char * name, int * out, size_t num, int timeout_ms)
+{
   sendCommand(0x08, name, strlen(name));
   uint8_t cmd = 0x08;
-  uint8_t *ptr;
+  uint8_t * ptr;
   int count = 0;
   int read_count = 0;
+  uint32_t start = millis();
   while ((read_count = readCommand(&cmd, &ptr)) < 0) {
     count += 1;
-    delay(1);
-    if (count > timeout_ms) {
-      // loginfo("timeout");
-      return false;
+    if (count % 100 == 0) {
+      if (millis() - start > timeout_ms) {
+        // loginfo("timeout");
+        return false;
+      }
     }
   }
-  if (read_count == 0) {
-    // cannot find parameter
+  if (read_count == 0 || read_count != sizeof(int) * num) {
+    // cannot find parameter or got wrong parameter (due to com issue)
     return false;
   }
   for (size_t i = 0; i < num; i++) {
@@ -169,23 +178,27 @@ bool Handle::getParam(char *name, int *out, size_t num, int timeout_ms) {
   return true;
 }
 
-void Handle::publish(uint8_t cmd, char *data,
-                     size_t num)  // prevent from no wrapping
+void Handle::publish(
+  uint8_t cmd, char * data,
+  size_t num)                     // prevent from no wrapping
 {
   sendCommand(cmd, reinterpret_cast<uint8_t *>(data), num);
 }
 
-void Handle::publish(uint8_t cmd, uint8_t *data,
-                     size_t num)  // prevent from no wrapping
+void Handle::publish(
+  uint8_t cmd, uint8_t * data,
+  size_t num)                     // prevent from no wrapping
 {
   sendCommand(cmd, data, num);
 }
 
-void Handle::publish(uint8_t cmd, int8_t *data, size_t num) {
+void Handle::publish(uint8_t cmd, int8_t * data, size_t num)
+{
   sendCommand(cmd, reinterpret_cast<uint8_t *>(data), num);
 }
 
-void Handle::publish(uint8_t cmd, float *data, size_t num) {
+void Handle::publish(uint8_t cmd, float * data, size_t num)
+{
   uint8_t temp[128];
   for (int i = 0; i < num; i++) {
     toBytes(data[i], temp + i * 4);
@@ -193,25 +206,29 @@ void Handle::publish(uint8_t cmd, float *data, size_t num) {
   sendCommand(cmd, temp, num * 4);
 }
 
-void Handle::publish(uint8_t cmd, int8_t data) {
+void Handle::publish(uint8_t cmd, int8_t data)
+{
   uint8_t buff[1];
   toBytes(data, buff, 1);
   sendCommand(cmd, buff, 1);
 }
 
-void Handle::publish(uint8_t cmd, int16_t data) {
+void Handle::publish(uint8_t cmd, int16_t data)
+{
   uint8_t buff[2];
   toBytes(data, buff, 2);
   sendCommand(cmd, buff, 2);
 }
 
-void Handle::publish(uint8_t cmd, float data) {
+void Handle::publish(uint8_t cmd, float data)
+{
   uint8_t buff[4];
   toBytes(data, buff);
   sendCommand(cmd, buff, 4);
 }
 
-void Handle::sync() {
+void Handle::sync()
+{
   uint8_t buff[8];
 
   if (is_synchronized()) {
@@ -226,13 +243,14 @@ void Handle::sync() {
   sendCommand(0x01, buff, 8);
 }
 
-bool Handle::is_synchronized() { return mTimeOffset > 0; }
+bool Handle::is_synchronized() {return mTimeOffset > 0;}
 
-Time Handle::now() { return _now(mTime, millis(), mTimeOffset); }
+Time Handle::now() {return _now(mTime, millis(), mTimeOffset);}
 
 /* private */
 
-Time Handle::_now(Time base, uint32_t ms, uint32_t offset) {
+Time Handle::_now(Time base, uint32_t ms, uint32_t offset)
+{
   Time current;
   int32_t diff = (ms - offset);  // mDelayRate;
 
@@ -249,7 +267,8 @@ Time Handle::_now(Time base, uint32_t ms, uint32_t offset) {
   returns time diff in microseconds (a-b)
   assumes time a and b are close enough
  */
-int32_t Handle::timeDiff(Time a, Time b) {
+int32_t Handle::timeDiff(Time a, Time b)
+{
   int32_t dsec = a.sec - b.sec;
   int32_t nsec = (a.nsec / 1000000L) - (b.nsec / 1000000L);
 
@@ -271,21 +290,24 @@ int32_t Handle::timeDiff(Time a, Time b) {
   command is parsed correctly -1 if the command is not parsed or in the middle
   of command
 */
-size_t Handle::readCommand(uint8_t *expect, uint8_t **ptr) {
+size_t Handle::readCommand(uint8_t * expect, uint8_t ** ptr)
+{
   static int DATA_MAX_SIZE_BYTE = 1;
   static uint8_t buffer[256];
+  static char buff[48];
 
   if (Serial.available() == 0) {
     return -1;
   }
   int received = Serial.read();
-  if (received < 0) return -1;
+  if (received < 0) {return -1;}
 #ifdef DEBUG
   // print out read command state
   if (state != 0 || received != 0) {
     static char buff[48];
-    snprintf(buff, 48, "%02x %d %d %x %x %d %d %d", received, state,
-             header_count, cmd, *expect, size, size_count, count);
+    snprintf(
+      buff, 48, "%02x %d %d %x %x %d %d %d", received, state,
+      header_count, cmd, *expect, size, size_count, count);
     loginfo(buff);
   }
 #endif
@@ -321,8 +343,10 @@ size_t Handle::readCommand(uint8_t *expect, uint8_t **ptr) {
     size = (received & 0xFF) << size_count * 8;
     size_count += 1;
     if (size_count == DATA_MAX_SIZE_BYTE) {
-      if (size < 0 || sizeof(buffer) < size) {
+      if (sizeof(buffer) < size) {
         state = 0;
+        snprintf(buff, 48, "size is too big cmd=%d, size=%d", cmd, size);
+        logwarn(buff);
         return 0;
       } else if (size == 0) {
         // if size is zero then skip to checksum
@@ -346,15 +370,18 @@ size_t Handle::readCommand(uint8_t *expect, uint8_t **ptr) {
       return size;
     } else {
       // if checksum is not matched, assumes there is no data
+      snprintf(buff, 48, "check sum is not matched");
+      logwarn(buff);
       return 0;
     }
   }
   return -1;
 }
 
-bool Handle::sendCommand(uint8_t type, uint8_t *data, size_t num) {
+bool cabot::Handle::sendCommand(uint8_t type, const uint8_t * data, size_t num)
+{
   static uint8_t buffer[256 + 6];
-  if (num < 0 || 256 < num) {
+  if (256 < num) {
     return false;
   }
 
@@ -378,11 +405,13 @@ bool Handle::sendCommand(uint8_t type, uint8_t *data, size_t num) {
   return true;
 }
 
-bool Handle::sendCommand(uint8_t type, char *data, size_t num) {
-  return sendCommand(type, reinterpret_cast<uint8_t *>(data), num);
+bool cabot::Handle::sendCommand(uint8_t type, const char * data, size_t num)
+{
+  return sendCommand(type, reinterpret_cast<const uint8_t *>(data), num);
 }
 
-uint8_t Handle::checksum(uint8_t *data, size_t num) {
+uint8_t Handle::checksum(const uint8_t * data, size_t num)
+{
   uint8_t temp = 0;
   for (size_t i = 0; i < num; i++) {
     temp += data[i];
@@ -390,7 +419,8 @@ uint8_t Handle::checksum(uint8_t *data, size_t num) {
   return 0xFF - (0xFF & temp);
 }
 
-typedef struct {
+typedef struct
+{
   uint8_t c1;
   uint8_t c2;
   uint8_t c3;
@@ -398,19 +428,22 @@ typedef struct {
 } convert_t;
 
 // bit shift over 16bit does not work
-uint32_t Handle::parseUInt32(uint8_t *ptr) {
+uint32_t Handle::parseUInt32(uint8_t * ptr)
+{
   convert_t temp = {ptr[0], ptr[1], ptr[2], ptr[3]};
   return *reinterpret_cast<uint32_t *>(&temp);
 }
 
-void Handle::toBytes(uint32_t v, uint8_t *ptr, size_t num) {
+void Handle::toBytes(uint32_t v, uint8_t * ptr, size_t num)
+{
   for (int i = 0; i < num; i++) {
     ptr[i] = (v >> 8 * i) & 0xFF;
   }
 }
 
-void Handle::toBytes(float v, uint8_t *ptr) {
-  convert_t *temp = reinterpret_cast<convert_t *>(&v);
+void Handle::toBytes(float v, uint8_t * ptr)
+{
+  convert_t * temp = reinterpret_cast<convert_t *>(&v);
   ptr[0] = temp->c1;
   ptr[1] = temp->c2;
   ptr[2] = temp->c3;
